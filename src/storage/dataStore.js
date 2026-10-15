@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { WriteAheadLog } from './wal.js';
 import { SchemaValidator } from './schemaValidator.js';
 import { IndexManager } from './indexManager.js';
@@ -39,6 +40,7 @@ export class DataStore {
      * @type {Promise<any>}
      */
     this._writeLock = Promise.resolve();
+    this._asyncLocalStorage = new AsyncLocalStorage();
 
     this._initializeStandardIndexes();
   }
@@ -134,7 +136,13 @@ export class DataStore {
    * @returns {Promise<T>}
    */
   _enqueueWrite(operation) {
-    const next = this._writeLock.then(() => operation());
+    if (this._asyncLocalStorage.getStore()) {
+      return Promise.resolve().then(() => operation());
+    }
+
+    const next = this._writeLock.then(() => {
+      return this._asyncLocalStorage.run(true, () => operation());
+    });
     this._writeLock = next.catch(() => {});
     return next;
   }
